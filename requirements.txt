@@ -1,0 +1,8 @@
+openai-whisper>=20230314
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+psutil>=5.9.0
+GPUtil>=1.4.0
+pathlib2>=2.3.0
+argparse

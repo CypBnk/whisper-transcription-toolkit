@@ -1,0 +1,27 @@
+{
+  "project_name": "Corporate Meeting Transcription",
+  "input_directory": "./meetings/2024",
+  "output_directory": "./transcripts/2024",
+  "processing_mode": "direct",
+  "whisper_model": "large-v3",
+  "language": "de",
+  "file_formats": {
+    "supported_input": [".mp4", ".avi", ".mov", ".mkv", ".webm", ".wav", ".mp3"],
+    "output": {
+      "transcript": "_transcript.txt",
+      "subtitles": "_subtitles.srt", 
+      "metadata": "_metadata.json"
+    }
+  },
+  "processing_settings": {
+    "batch_size": 1,
+    "max_workers": 1,
+    "exclude_hidden_folders": true,
+    "preserve_folder_structure": true
+  },
+  "expected_performance": {
+    "gpu_acceleration": true,
+    "estimated_speed_multiplier": 2.8,
+    "note": "Times based on RTX 3090 with large-v3 model"
+  }
+}
