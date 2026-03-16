@@ -22,6 +22,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import psutil
 import GPUtil
 
+def configure_ffmpeg_path():
+    """Ensure ffmpeg is available on PATH, including bundled imageio-ffmpeg fallback."""
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_dir = str(Path(ffmpeg_exe).parent)
+        current_path = os.environ.get("PATH", "")
+        if ffmpeg_dir not in current_path.split(os.pathsep):
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path
+    except Exception:
+        # Continue; system ffmpeg may still be available.
+        pass
+
 def get_system_resources():
     """Monitor system resources for performance tracking"""
     cpu_percent = psutil.cpu_percent(interval=1)
@@ -182,6 +195,7 @@ def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="
         max_workers: Number of parallel workers (careful with GPU memory)
     """
     input_path = Path(input_dir)
+    configure_ffmpeg_path()
     
     # Set default output directory
     if output_dir is None:
