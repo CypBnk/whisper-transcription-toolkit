@@ -25,6 +25,7 @@ MANIFEST
 # Virtual environment
 transcription_env/
 venv/
+.venv/
 env/
 ENV/
 
