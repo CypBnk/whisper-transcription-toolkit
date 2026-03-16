@@ -68,6 +68,12 @@ source .venv/bin/activate
 pip install --upgrade -r requirements.txt
 ```
 
+Optional (NVIDIA CUDA 12.8 wheels):
+
+```bash
+pip install --upgrade -r requirements.cuda-cu128.txt
+```
+
 Run project commands from the repository root with the virtual environment activated.
 
 Windows example:
@@ -78,7 +84,7 @@ Set-Location 'F:\Dev\AI\Branched\whisper-transcription-toolkit'
 python .\setup_environment.py --test
 ```
 
-The current `requirements.txt` is pinned to a verified CUDA-enabled Windows environment. If you are using a different CUDA version, operating system, or a CPU-only machine, you may need to adjust the PyTorch package lines.
+`requirements.txt` is the portable default set. Use `requirements.cuda-cu128.txt` only when you explicitly want CUDA 12.8 PyTorch wheels.
 
 1. **Install FFmpeg**
 

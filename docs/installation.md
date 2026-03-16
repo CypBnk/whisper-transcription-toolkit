@@ -104,6 +104,9 @@ source .venv/bin/activate
 
 # Install requirements
 pip install --upgrade -r requirements.txt
+
+# Optional: install CUDA 12.8 PyTorch wheels
+pip install --upgrade -r requirements.cuda-cu128.txt
 ```
 
 Run commands from the repository root with the virtual environment activated.
@@ -122,7 +125,7 @@ If system FFmpeg is not available in PATH, you can install a Python-managed fall
 pip install imageio-ffmpeg
 ```
 
-Note: the pinned `requirements.txt` reflects a verified CUDA-enabled Windows environment. If you are on another platform, using a different CUDA toolkit, or running CPU-only, adjust the PyTorch package versions as needed.
+Note: `requirements.txt` is the portable default set. Use `requirements.cuda-cu128.txt` only when you explicitly need CUDA 12.8 PyTorch wheels.
 
 ### 5. Verify Installation
 
