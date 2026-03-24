@@ -18,11 +18,33 @@ import os
 import subprocess
 import sys
 
+def configure_ffmpeg_path():
+    """Ensure an ffmpeg binary is reachable, including bundled imageio-ffmpeg."""
+    # Fast path: ffmpeg already available on PATH
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+        if result.returncode == 0:
+            return True
+    except FileNotFoundError:
+        pass
+
+    # Fallback: expose imageio-ffmpeg binary on PATH for this process
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+        os.environ['PATH'] = ffmpeg_dir + os.pathsep + os.environ.get('PATH', '')
+        result = subprocess.run([ffmpeg_exe, '-version'], capture_output=True, text=True)
+        return result.returncode == 0
+    except Exception:
+        return False
+
 def check_system_requirements():
     """Validate system setup for optimal transcription performance"""
     print("🔍 === System Environment Check ===\n")
     
     issues = []
+    warnings = []
     recommendations = []
     
     # Python version check
@@ -51,7 +73,7 @@ def check_system_requirements():
             elif gpu_memory >= 8:
                 recommendations.append(f"GPU {i} can handle large Whisper models (large-v3)")
     else:
-        issues.append("CUDA not detected. Transcription will use CPU (slower)")
+        warnings.append("CUDA not detected. Transcription will use CPU (slower)")
         recommendations.append("Install CUDA toolkit for GPU acceleration")
     
     # System RAM check
@@ -75,13 +97,10 @@ def check_system_requirements():
         recommendations.append("Low CPU core count. Consider processing files sequentially")
     
     # FFmpeg check
-    try:
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
-        if result.returncode == 0:
-            print("🎬 FFmpeg: ✅ Available")
-        else:
-            issues.append("FFmpeg not working properly")
-    except FileNotFoundError:
+    ffmpeg_ok = configure_ffmpeg_path()
+    if ffmpeg_ok:
+        print("🎬 FFmpeg: ✅ Available")
+    else:
         issues.append("FFmpeg not found. Required for video processing")
         recommendations.append("Install FFmpeg: https://ffmpeg.org/download.html")
     
@@ -102,6 +121,11 @@ def check_system_requirements():
         print("⚠️  Issues detected:")
         for issue in issues:
             print(f"   ❌ {issue}")
+
+    if warnings:
+        print("\n⚠️  Non-blocking warnings:")
+        for warning in warnings:
+            print(f"   ⚠️  {warning}")
     
     if recommendations:
         print("\n💡 Recommendations:")
@@ -157,31 +181,24 @@ def test_transcription():
 def install_requirements():
     """Install or upgrade required packages"""
     print("\n📦 === Package Installation ===")
-    
-    requirements = [
-        "openai-whisper>=20230314",
-        "torch",
-        "torchvision", 
-        "torchaudio",
-        "psutil>=5.9.0",
-        "GPUtil>=1.4.0"
-    ]
-    
-    print("Installing/upgrading required packages...")
-    
-    for package in requirements:
-        try:
-            result = subprocess.run([
-                sys.executable, "-m", "pip", "install", "--upgrade", package
-            ], capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                print(f"✅ {package}")
-            else:
-                print(f"❌ {package}: {result.stderr}")
-                
-        except Exception as e:
-            print(f"❌ {package}: {str(e)}")
+    print("Installing/upgrading required packages from requirements.txt...")
+
+    requirements_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
+    if not os.path.exists(requirements_file):
+        print("❌ requirements.txt not found")
+        return
+
+    try:
+        result = subprocess.run([
+            sys.executable, "-m", "pip", "install", "--upgrade", "-r", requirements_file
+        ], capture_output=True, text=True)
+
+        if result.returncode == 0:
+            print("✅ Requirements installed/upgraded successfully")
+        else:
+            print(f"❌ Failed to install requirements:\n{result.stderr}")
+    except Exception as e:
+        print(f"❌ Error during installation: {str(e)}")
 
 def main():
     """Run complete environment setup and validation"""
