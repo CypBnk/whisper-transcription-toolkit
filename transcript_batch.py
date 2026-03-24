@@ -17,6 +17,7 @@ import time
 import json
 import whisper
 import argparse
+import warnings
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import psutil
@@ -79,7 +80,7 @@ def convert_mp4_to_mp3(input_file, output_file):
     except Exception as e:
         return False, str(e)
 
-def transcribe_single_file(audio_file, model, output_base_dir, input_base_dir):
+def transcribe_single_file(audio_file, model, output_base_dir, input_base_dir, word_timestamps=False, model_name="large-v3"):
     """Transcribe a single audio file and return processing results"""
     audio_path = Path(audio_file)
     
@@ -98,17 +99,28 @@ def transcribe_single_file(audio_file, model, output_base_dir, input_base_dir):
     
     try:
         # Transcribe with German language optimization
-        result = model.transcribe(
-            str(audio_path),
-            language="de",  # German language
-            word_timestamps=True,
-            verbose=False  # Reduce console output for batch processing
-        )
+        transcribe_kwargs = {
+            "language": "de",  # German language
+            "word_timestamps": word_timestamps,
+            "verbose": False,  # Reduce console output for batch processing
+        }
+
+        if word_timestamps:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Failed to launch Triton kernels, likely due to missing CUDA toolkit;.*",
+                    category=UserWarning,
+                )
+                result = model.transcribe(str(audio_path), **transcribe_kwargs)
+        else:
+            result = model.transcribe(str(audio_path), **transcribe_kwargs)
 
         # Create output file paths
-        txt_path = output_dir / f"{base_name}_transcript.txt"
-        srt_path = output_dir / f"{base_name}_subtitles.srt"
-        json_path = output_dir / f"{base_name}_metadata.json"
+        prefix = model_prefix(model_name)
+        txt_path = output_dir / f"{prefix}_{base_name}_transcript.txt"
+        srt_path = output_dir / f"{prefix}_{base_name}_subtitles.srt"
+        json_path = output_dir / f"{prefix}_{base_name}_metadata.json"
 
         # Write transcript files
         with open(txt_path, 'w', encoding='utf-8') as txt_file, \
@@ -134,6 +146,7 @@ def transcribe_single_file(audio_file, model, output_base_dir, input_base_dir):
             'language': result.get('language', 'de'),
             'processing_time_seconds': processing_time,
             'segments_count': len(result["segments"]),
+            'word_timestamps': word_timestamps,
             'full_text': result["text"]
         }
 
@@ -183,7 +196,7 @@ def find_media_files(input_dir, exclude_hidden=True):
     
     return media_files, video_formats
 
-def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="large-v3", max_workers=1):
+def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="large-v3", max_workers=1, word_timestamps=False):
     """
     Batch process videos with choice of direct transcription or MP3 conversion
     
@@ -218,6 +231,10 @@ def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="
     # Load Whisper model
     print(f"\n🤖 Loading Whisper model: {model_name}")
     model = whisper.load_model(model_name)
+    if word_timestamps:
+        print("ℹ️  Word timestamps enabled (slower).")
+    else:
+        print("ℹ️  Word timestamps disabled (faster, no Triton timing fallback warnings).")
 
     # Create output directory
     output_path.mkdir(parents=True, exist_ok=True)
@@ -295,10 +312,12 @@ def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="
         print(f"\n📝 [{i}/{len(files_to_transcribe)}] Processing: {audio_file.name}")
         
         result = transcribe_single_file(
-            audio_file, 
-            model, 
-            output_dir, 
-            input_base_for_structure
+            audio_file,
+            model,
+            output_dir,
+            input_base_for_structure,
+            word_timestamps,
+            model_name,
         )
         
         transcription_results.append(result)
@@ -336,6 +355,7 @@ def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="
     batch_stats = {
         'mode': mode,
         'model': model_name,
+        'word_timestamps': word_timestamps,
         'total_files': len(media_files),
         'files_to_transcribe': len(files_to_transcribe),
         'successful_transcriptions': successful_transcriptions,
@@ -351,6 +371,20 @@ def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="
         json.dump(batch_stats, f, indent=2, ensure_ascii=False)
 
     print(f"📄 Detailed statistics saved: {stats_file}")
+
+def model_prefix(model_name: str) -> str:
+    """Return a short version prefix for a given Whisper model name."""
+    _PREFIX = {
+        "medium": "v1",
+        "large-v3": "v2",
+        "large": "v2",
+        "large-v2": "v2",
+        "small": "small",
+        "base": "base",
+        "tiny": "tiny",
+    }
+    return _PREFIX.get(model_name, model_name)
+
 
 def format_time(seconds):
     """Format seconds to HH:MM:SS or MM:SS"""
@@ -431,6 +465,7 @@ def interactive_mode():
     print(f"📤 Output: {output_dir}")
     print(f"🔧 Mode: {mode}")
     print(f"🤖 Model: {model_name}")
+    print("🔎 Word timestamps: disabled")
     
     confirm = input("\nProceed with transcription? (y/N): ").strip().lower()
     if confirm != 'y':
@@ -438,7 +473,7 @@ def interactive_mode():
         return
     
     # Start processing
-    batch_process_videos(input_dir, output_dir, mode, model_name)
+    batch_process_videos(input_dir, output_dir, mode, model_name, word_timestamps=False)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -465,6 +500,8 @@ Examples:
                         default='large-v3', help='Whisper model to use (default: large-v3)')
     parser.add_argument('--workers', '-w', type=int, default=1,
                         help='Number of parallel workers (be careful with GPU memory)')
+    parser.add_argument('--word-timestamps', action='store_true',
+                        help='Enable word-level timestamps (slower; can trigger Triton fallback path).')
     
     args = parser.parse_args()
     
@@ -481,7 +518,8 @@ Examples:
             output_dir,
             args.mode,
             args.model,
-            args.workers
+            args.workers,
+            args.word_timestamps,
         )
         return 0
     else:

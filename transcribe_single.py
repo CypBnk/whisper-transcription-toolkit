@@ -14,6 +14,7 @@ import time
 import os
 import whisper
 import argparse
+import warnings
 from pathlib import Path
 import json
 
@@ -30,7 +31,7 @@ def configure_ffmpeg_path():
         # Continue; system ffmpeg may still be available.
         pass
 
-def transcribe_video(video_path, output_dir=None, model_name="large-v3"):
+def transcribe_video(video_path, output_dir=None, model_name="large-v3", language=None, word_timestamps=False):
     """
     Transcribes a single video using OpenAI Whisper while preserving folder structure
     
@@ -38,6 +39,8 @@ def transcribe_video(video_path, output_dir=None, model_name="large-v3"):
         video_path: Path to the input video/audio file
         output_dir: Optional output directory (auto-determined if None)
         model_name: Whisper model to use (tiny, base, small, medium, large, large-v2, large-v3)
+        language: Language code (e.g., 'en' for English, 'de' for German, or None for auto-detect)
+        word_timestamps: Enable word-level timestamps (slower, may trigger Triton fallback warnings)
     
     Returns:
         tuple: (txt_path, srt_path) of created output files
@@ -82,22 +85,35 @@ def transcribe_video(video_path, output_dir=None, model_name="large-v3"):
     print(f"Starting transcription: {video_path.name}")
     start_time = time.time()
 
-    # Transcribe with German language setting (optimized for German content)
-    result = model.transcribe(
-        str(video_path),
-        language="de",  # German language
-        word_timestamps=True,
-        verbose=True
-    )
+    # Transcribe with specified language (or auto-detect if not provided)
+    transcribe_kwargs = {
+        "word_timestamps": word_timestamps,
+        "verbose": True
+    }
+    if language:
+        transcribe_kwargs["language"] = language
+
+    # Suppress known optional-kernel warnings when word timestamps are requested.
+    if word_timestamps:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Failed to launch Triton kernels, likely due to missing CUDA toolkit;.*",
+                category=UserWarning,
+            )
+            result = model.transcribe(str(video_path), **transcribe_kwargs)
+    else:
+        result = model.transcribe(str(video_path), **transcribe_kwargs)
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     base_name = video_path.stem
 
     # Output file paths
-    txt_path = output_dir / f"{base_name}_transcript.txt"
-    srt_path = output_dir / f"{base_name}_subtitles.srt"
-    json_path = output_dir / f"{base_name}_metadata.json"
+    prefix = model_prefix(model_name)
+    txt_path = output_dir / f"{prefix}_{base_name}_transcript.txt"
+    srt_path = output_dir / f"{prefix}_{base_name}_subtitles.srt"
+    json_path = output_dir / f"{prefix}_{base_name}_metadata.json"
 
     # Write transcript files
     with open(txt_path, 'w', encoding='utf-8') as txt_file, \
@@ -120,10 +136,11 @@ def transcribe_video(video_path, output_dir=None, model_name="large-v3"):
     # Create metadata JSON with processing details
     metadata = {
         'file_name': video_path.name,
-        'language': result.get('language', 'de'),
+        'language': result.get('language', 'unknown'),
         'processing_time_seconds': duration,
         'segments_count': len(result["segments"]),
         'model_used': model_name,
+        'word_timestamps': word_timestamps,
         'full_text': result["text"]
     }
 
@@ -132,7 +149,7 @@ def transcribe_video(video_path, output_dir=None, model_name="large-v3"):
 
     print(f"✅ Transcription completed!")
     print(f"⏱️  Processing time: {duration:.2f} seconds")
-    print(f"🗣️  Language detected: {result.get('language', 'de')}")
+    print(f"🗣️  Language detected: {result.get('language', 'unknown')}")
     print(f"📁 Output directory: {output_dir}")
     print(f"📄 Files created:")
     print(f"   - TXT: {txt_path.name}")
@@ -140,6 +157,20 @@ def transcribe_video(video_path, output_dir=None, model_name="large-v3"):
     print(f"   - JSON: {json_path.name}")
 
     return txt_path, srt_path
+
+def model_prefix(model_name: str) -> str:
+    """Return a short version prefix for a given Whisper model name."""
+    _PREFIX = {
+        "medium": "v1",
+        "large-v3": "v2",
+        "large": "v2",
+        "large-v2": "v2",
+        "small": "small",
+        "base": "base",
+        "tiny": "tiny",
+    }
+    return _PREFIX.get(model_name, model_name)
+
 
 def format_time(seconds):
     """Format seconds to MM:SS or HH:MM:SS"""
@@ -180,6 +211,10 @@ Examples:
     parser.add_argument('--model', '-m', default='large-v3',
                         choices=['tiny', 'base', 'small', 'medium', 'large', 'large-v2', 'large-v3'],
                         help='Whisper model to use (default: large-v3 for best accuracy)')
+    parser.add_argument('--language', '-l', default=None,
+                        help='Language code (e.g., "en" for English, "de" for German). If not specified, language will be auto-detected.')
+    parser.add_argument('--word-timestamps', action='store_true',
+                        help='Enable word-level timestamps (slower; can trigger Triton fallback warnings).')
 
     args = parser.parse_args()
 
@@ -189,7 +224,13 @@ Examples:
         return 1
 
     try:
-        transcribe_video(args.video_path, args.output, args.model)
+        transcribe_video(
+            args.video_path,
+            args.output,
+            args.model,
+            args.language,
+            args.word_timestamps,
+        )
         return 0
     except KeyboardInterrupt:
         print("\n⏹️  Transcription cancelled by user")
