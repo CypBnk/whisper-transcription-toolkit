@@ -196,7 +196,7 @@ def find_media_files(input_dir, exclude_hidden=True):
     
     return media_files, video_formats
 
-def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="large-v3", max_workers=1, word_timestamps=False):
+def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="large-v3", max_workers=1, word_timestamps=False, dual_pass=False):
     """
     Batch process videos with choice of direct transcription or MP3 conversion
     
@@ -206,7 +206,46 @@ def batch_process_videos(input_dir, output_dir=None, mode="direct", model_name="
         mode: "direct" for direct MP4 transcription, "convert" for MP3 conversion first
         model_name: Whisper model to use
         max_workers: Number of parallel workers (careful with GPU memory)
+        dual_pass: If True, run batch twice (V1 with medium, then V2 with large-v3)
     """
+    
+    # If dual_pass is enabled, recursively call batch_process_videos for both models
+    if dual_pass:
+        print("\n🔄 Dual-pass mode enabled (V1 + V2)")
+        print("=" * 50)
+        
+        # First pass: V1 (medium model)
+        print("\n📊 PASS 1/2: V1 Processing (medium model)")
+        print("-" * 50)
+        batch_process_videos(
+            input_dir,
+            output_dir,
+            mode,
+            "medium",
+            max_workers,
+            word_timestamps,
+            dual_pass=False  # Prevent infinite recursion
+        )
+        
+        # Second pass: V2 (large-v3 model)
+        print("\n📊 PASS 2/2: V2 Processing (large-v3 model)")
+        print("-" * 50)
+        batch_process_videos(
+            input_dir,
+            output_dir,
+            mode,
+            "large-v3",
+            max_workers,
+            word_timestamps,
+            dual_pass=False  # Prevent infinite recursion
+        )
+        
+        # Final summary
+        print("\n✅ Dual-pass batch processing completed!")
+        print("   V1 files (medium): v1_* prefix")
+        print("   V2 files (large-v3): v2_* prefix")
+        print(f"   Location: {output_dir}")
+        return
     input_path = Path(input_dir)
     configure_ffmpeg_path()
     
@@ -434,37 +473,55 @@ def interactive_mode():
             break
         print("❌ Please enter 1 or 2")
     
-    # Choose model
-    print("\n🤖 Choose Whisper model:")
-    models = [
-        ("tiny", "39 MB, fastest, basic accuracy"),
-        ("base", "74 MB, fast, good for testing"), 
-        ("small", "244 MB, balanced speed/accuracy"),
-        ("medium", "769 MB, high accuracy"),
-        ("large", "1550 MB, very high accuracy"),
-        ("large-v2", "1550 MB, improved large model"),
-        ("large-v3", "1550 MB, best accuracy (recommended)")
-    ]
-    
-    for i, (model, desc) in enumerate(models, 1):
-        print(f"{i}. {model} - {desc}")
+    # Choose single or dual-pass
+    print("\n🔄 Choose processing mode:")
+    print("1. Single model (select which one)")
+    print("2. Dual-pass (V1 medium → V2 large-v3)")
     
     while True:
-        try:
-            choice = int(input(f"Enter choice (1-{len(models)}) [default: 7 for large-v3]: ").strip() or "7")
-            if 1 <= choice <= len(models):
-                model_name = models[choice - 1][0]
-                break
-        except ValueError:
-            pass
-        print(f"❌ Please enter a number between 1 and {len(models)}")
+        choice = input("Enter choice (1 or 2) [default: 1]: ").strip() or "1"
+        if choice in ["1", "2"]:
+            dual_pass = choice == "2"
+            break
+        print("❌ Please enter 1 or 2")
+    
+    # Choose model (skip if dual-pass)
+    if not dual_pass:
+        print("\n🤖 Choose Whisper model:")
+        models = [
+            ("tiny", "39 MB, fastest, basic accuracy"),
+            ("base", "74 MB, fast, good for testing"), 
+            ("small", "244 MB, balanced speed/accuracy"),
+            ("medium", "769 MB, high accuracy"),
+            ("large", "1550 MB, very high accuracy"),
+            ("large-v2", "1550 MB, improved large model"),
+            ("large-v3", "1550 MB, best accuracy (recommended)")
+        ]
+        
+        for i, (model, desc) in enumerate(models, 1):
+            print(f"{i}. {model} - {desc}")
+        
+        while True:
+            try:
+                choice = int(input(f"Enter choice (1-{len(models)}) [default: 7 for large-v3]: ").strip() or "7")
+                if 1 <= choice <= len(models):
+                    model_name = models[choice - 1][0]
+                    break
+            except ValueError:
+                pass
+            print(f"❌ Please enter a number between 1 and {len(models)}")
+    else:
+        model_name = "large-v3"  # Will be overridden by dual_pass logic
     
     # Show configuration summary
     print(f"\n⚙️  Configuration Summary:")
     print(f"📁 Input: {input_dir}")
     print(f"📤 Output: {output_dir}")
     print(f"🔧 Mode: {mode}")
-    print(f"🤖 Model: {model_name}")
+    if dual_pass:
+        print(f"🤖 Model: Dual-pass (V1: medium → V2: large-v3)")
+    else:
+        print(f"🤖 Model: {model_name}")
     print("🔎 Word timestamps: disabled")
     
     confirm = input("\nProceed with transcription? (y/N): ").strip().lower()
@@ -473,11 +530,11 @@ def interactive_mode():
         return
     
     # Start processing
-    batch_process_videos(input_dir, output_dir, mode, model_name, word_timestamps=False)
+    batch_process_videos(input_dir, output_dir, mode, model_name, word_timestamps=False, dual_pass=dual_pass)
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Batch transcription with choice of direct MP4 or MP3 conversion',
+        description='Batch transcription with choice of direct MP4 or MP3 conversion, or dual-pass V1+V2',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -489,6 +546,12 @@ Examples:
   
   # Convert to MP3 first (saves disk space)
   python transcript_batch.py "/path/to/videos" --mode convert --model base
+  
+  # Dual-pass: Run V1 (medium) then V2 (large-v3) automatically
+  python transcript_batch.py "/path/to/videos" --dual-pass
+  
+  # Dual-pass with MP3 conversion
+  python transcript_batch.py "/path/to/videos" --mode convert --dual-pass
         """
     )
     
@@ -502,6 +565,8 @@ Examples:
                         help='Number of parallel workers (be careful with GPU memory)')
     parser.add_argument('--word-timestamps', action='store_true',
                         help='Enable word-level timestamps (slower; can trigger Triton fallback path).')
+    parser.add_argument('--dual-pass', action='store_true',
+                        help='Run batch twice: V1 (medium) then V2 (large-v3). Ignores --model selection.')
     
     args = parser.parse_args()
     
@@ -520,6 +585,7 @@ Examples:
             args.model,
             args.workers,
             args.word_timestamps,
+            args.dual_pass,
         )
         return 0
     else:
